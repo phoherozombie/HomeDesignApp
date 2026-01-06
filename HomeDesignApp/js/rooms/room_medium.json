@@ -1,0 +1,7 @@
+[
+  { "type": "floor", "size": [6, 1, 6] },
+  { "type": "wall", "position": [0,1,-3], "scale": [6,2,0.1] },
+  { "type": "wall", "position": [0,1,3], "scale": [6,2,0.1] },
+  { "type": "wall", "position": [-3,1,0], "scale": [0.1,2,6] },
+  { "type": "wall", "position": [3,1,0], "scale": [0.1,2,6] }
+]

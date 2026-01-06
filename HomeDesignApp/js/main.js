@@ -5,6 +5,7 @@ import { DRACOLoader } from "https://unpkg.com/three@0.153.0/examples/jsm/loader
 import { RGBELoader } from "https://unpkg.com/three@0.153.0/examples/jsm/loaders/RGBELoader.js";
 import { TransformControls } from "https://unpkg.com/three@0.153.0/examples/jsm/controls/TransformControls.js";
 
+
 let clickableObjects = []
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
@@ -84,6 +85,34 @@ function hideLightUI(){
   const LightUI = document.getElementById("light-adjustments-container")
   LightUI.style.display = "none"
 }
+function showFurnitureColorUI() {
+  const ui = document.getElementById("furniture-color-container");
+  ui.style.display = "flex";
+}
+
+function hideFurnitureColorUI() {
+  const ui = document.getElementById("furniture-color-container");
+  ui.style.display = "none";
+}
+function applyColorToSelectedObject(color) {
+  if (!selectedObject) return;
+
+  selectedObject.traverse((child) => {
+    if (child.isMesh) {
+      // Clone material để tránh đổi màu toàn bộ object cùng model
+      child.material = child.material.clone();
+
+      // Tắt texture nếu có
+      if (child.material.map) {
+        child.material.map = null;
+      }
+
+      child.material.color = new THREE.Color(color);
+      child.material.needsUpdate = true;
+    }
+  });
+}
+
 
 //handle mouse click on objects and outside of it
 //for selection and de-selection
@@ -100,6 +129,7 @@ function mouseClickOnObject(event){
     if (selectedObject) {
       transformControls.detach();
     }
+    playSound("sound-click");
       
 
     transformControls.attach(intersectedObject)
@@ -109,15 +139,32 @@ function mouseClickOnObject(event){
 
     //hides the light UI and only displays it again if a light is selected
     hideLightUI()
-    displayLightUI()
+    hideFurnitureColorUI()
+displayLightUI()
+
+// nếu KHÔNG phải light thì hiện UI đổi màu
+if (selectedObject) {
+  let hasLight = false;
+  selectedObject.traverse((e)=>{
+    if (e.isLight) hasLight = true;
+  });
+
+  if (!hasLight) {
+    showFurnitureColorUI();
+  }
+}
+
   }
   //unselect object
+  
   else
   {
     transformControls.detach(selectedObject)
     selectedObject = null
     selectedBox.setFromCenterAndSize(new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,0));
     hideLightUI()
+    hideFurnitureColorUI();
+
   }
 }
 
@@ -126,7 +173,7 @@ function deleteSelectedObject(){
   if (selectedObject)
   {
     const index = clickableObjects.indexOf(selectedObject)
-    
+       playSound("sound-delete"); 
     //for safety
     if (index != -1)
     {
@@ -280,6 +327,52 @@ function addObject(object,
 
   loader.load(modelPath, (gltf)=>{
     const model = gltf.scene;
+    playSound("sound-add"); 
+model.userData.modelPath = object.path;
+function clearSceneObjects() {
+  clickableObjects.forEach(obj => scene.remove(obj));
+  clickableObjects = [];
+  transformControls.detach();
+  selectedObject = null;
+}
+
+function loadSceneFromLocalStorage() {
+  const raw = localStorage.getItem("room_design");
+  if (!raw) {
+    alert("No saved scene found!");
+    return;
+  }
+
+  const data = JSON.parse(raw);
+
+  clearSceneObjects();
+
+  data.forEach(el => {
+    if (el.type === "light") {
+      addLight(
+        new THREE.Vector3(...el.position),
+        el.intensity,
+        el.color,
+        false
+      );
+    } else if (el.type === "object") {
+      const objDef = jsonData.objects.find(o => o.path === el.path);
+      if (!objDef) return;
+
+      addObject(
+        objDef,
+        new THREE.Vector3(...el.position),
+        new THREE.Vector3(el.rotation[0], el.rotation[1], el.rotation[2]),
+        new THREE.Vector3(...el.scale),
+        false
+      );
+    }
+  });
+
+  alert("Scene loaded!");
+}
+
+
     selectedObject = model
 
     model.traverse(function(object){
@@ -292,10 +385,37 @@ function addObject(object,
 
     //all objects belong to a group so we can transform it as a whole
     const group = new THREE.Group()
-    group.position.copy(position)
+  // position
+group.position.set(0, 0, 0); // start from origin (hoặc có thể dưới mặt đất)
+group.scale.set(0.1, 0.1, 0.1); // start nhỏ
 
-    group.rotation.setFromVector3(rotation)
-    group.scale.copy(scale)
+scene.add(group);
+
+// Smooth animation
+gsap.to(group.position, { 
+  x: position.x, 
+  y: position.y, 
+  z: position.z, 
+  duration: 0.6, 
+  ease: "power2.out" 
+});
+
+gsap.to(group.rotation, { 
+  x: rotation.x, 
+  y: rotation.y, 
+  z: rotation.z, 
+  duration: 0.6, 
+  ease: "power2.out" 
+});
+
+gsap.to(group.scale, { 
+  x: scale.x, 
+  y: scale.y, 
+  z: scale.z, 
+  duration: 0.6, 
+  ease: "back.out(1.7)" 
+});
+
 
     group.add(model)
     group.name = 'group'
@@ -319,7 +439,7 @@ function addObject(object,
 function addLight(position = new THREE.Vector3(0,1,0), intensity= 1, color = "#ffffff", select = true){
     //group to control the light
     const lightControlGroup = new THREE.Group()
-    lightControlGroup.position.copy(position);
+  
   
     //mesh to represent the light. Will be a simple wireframe
     const lightControlGeometry = new THREE.SphereGeometry(0.15,2,2);
@@ -341,7 +461,32 @@ function addLight(position = new THREE.Vector3(0,1,0), intensity= 1, color = "#f
     lightControlGroup.name = 'group'
     clickableObjects.push(lightControlGroup)
 
-    scene.add( lightControlGroup );
+// start từ vị trí 0,0,0
+lightControlGroup.position.set(0, 0, 0);
+
+// point light bắt đầu tối
+light01.intensity = 0;
+
+// thêm group vào scene
+scene.add(lightControlGroup);
+playSound("sound-add");
+
+// tween position tới vị trí thực tế
+gsap.to(lightControlGroup.position, {
+  x: position.x,
+  y: position.y,
+  z: position.z,
+  duration: 0.6,
+  ease: "power2.out"
+});
+
+// tween intensity sáng dần
+gsap.to(light01, {
+  intensity: intensity,
+  duration: 0.6,
+  ease: "power2.out"
+});
+
 
     //selects last clicked light
     if (transformControls && select)
@@ -356,6 +501,11 @@ function addLight(position = new THREE.Vector3(0,1,0), intensity= 1, color = "#f
 function initButtons(){
   const addLightBtn = document.getElementById('add-light-btn')
   const deleteObjectBtn = document.getElementById('delete-obj-btn')
+const saveBtn = document.getElementById("save-btn");
+const loadBtn = document.getElementById("load-btn");
+
+saveBtn.onclick = () => saveSceneToLocalStorage();
+loadBtn.onclick = () => loadSceneFromLocalStorage();
 
   addLightBtn.onclick = () =>{
     addLight()
@@ -429,6 +579,8 @@ async function start() {
   renderer = new THREE.WebGLRenderer({ antialias: true });
   scene = new THREE.Scene();
   scene.background = new THREE.Color( 0xe7e7e7 );
+const gridHelper = new THREE.GridHelper(20, 20, 0x888888, 0x444444);
+scene.add(gridHelper);
 
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
@@ -471,13 +623,69 @@ async function start() {
     controls.enabled = ! event.value;
     canSelect = !event.value;
   });
+// ===============================
+// TRANSFORM CONTROLS SNAP
+// ===============================
+const gridSize = 0.5; // mỗi ô grid = 0.5 units
+transformControls.setTranslationSnap(gridSize); // snap khi di chuyển
+transformControls.setRotationSnap(THREE.MathUtils.degToRad(15));
+transformControls.setScaleSnap(0.1);
+scene.add(transformControls)
 
   transformControls.setTranslationSnap( 0.05 );
   transformControls.setRotationSnap( THREE.MathUtils.degToRad( 15 ) );
   transformControls.setScaleSnap( 0.1 );
 
   scene.add(transformControls)
+  transformControls.addEventListener('objectChange', () => {
+    if (!selectedObject) return;
 
+    // Snap theo grid
+    const grid = gridSize;
+transformControls.addEventListener('objectChange', () => {
+  if (!selectedObject) return;
+
+  const grid = gridSize;
+  const targetPos = {
+    x: Math.round(selectedObject.position.x / grid) * grid,
+    y: Math.round(selectedObject.position.y / grid) * grid,
+    z: Math.round(selectedObject.position.z / grid) * grid
+  };
+
+  gsap.to(selectedObject.position, {
+        x: targetPos.x,
+        y: targetPos.y,
+        z: targetPos.z,
+        duration: 0.3,
+        ease: "power2.out",
+        onComplete: () => {
+            // Snap xong → phát âm thanh
+            playSound("sound-snap");
+        }
+    });
+
+  selectedBox.setFromObject(selectedObject, true);
+});
+
+
+    selectedBox.setFromObject(selectedObject, true);
+});
+
+
+  // ===============================
+  // FURNITURE COLOR PICKER SETUP ✅
+  // ===============================
+  const furnitureColorInput = document.getElementById("furniture-color-input");
+  const furnitureColorText = document.getElementById("furniture-color-text");
+
+  if (furnitureColorInput && furnitureColorText) {
+    furnitureColorInput.oninput = (e) => {
+      const color = e.target.value;
+      furnitureColorText.innerText = `Color: ${color}`;
+      applyColorToSelectedObject(color);
+    };
+  }
+  
   // load main json file with all the app parameters and data
   fetch("./js/params.json")
     .then(res => res.json())
@@ -568,3 +776,44 @@ const Delay = (milliseconds) => {
     }, milliseconds);
   });
 };
+function saveSceneToLocalStorage() {
+  const data = [];
+
+  clickableObjects.forEach(obj => {
+    // LIGHT
+    const light = obj.getObjectByName("light");
+    if (light) {
+      data.push({
+        type: "light",
+        position: [obj.position.x, obj.position.y, obj.position.z],
+        intensity: light.intensity,
+        color: "#" + light.color.getHexString()
+      });
+      return;
+    }
+
+    // OBJECT (furniture)
+    const model = obj.children[0];
+    const modelPath = model?.userData?.modelPath;
+    if (!modelPath) return;
+
+    data.push({
+      type: "object",
+      path: modelPath,
+      position: [obj.position.x, obj.position.y, obj.position.z],
+      rotation: [obj.rotation.x, obj.rotation.y, obj.rotation.z],
+      scale: [obj.scale.x, obj.scale.y, obj.scale.z]
+    });
+  });
+
+  localStorage.setItem("room_design", JSON.stringify(data));
+  alert("Scene saved!");
+}
+function playSound(id) {
+  const audio = document.getElementById(id);
+  if (audio) {
+    audio.currentTime = 0; // reset để phát từ đầu
+    audio.volume = 1; // optional: chỉnh âm lượng (0-1)
+    audio.play();
+  }
+}
