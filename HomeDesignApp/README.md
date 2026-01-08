@@ -25,6 +25,7 @@ An interactive web application that allows users to design and arrange interior 
 * **Grid Snapping:** Automatically snaps objects to the grid (0.5-unit increments) for neat and organized layouts.
 * **Sound Effects:** Immersive audio feedback when adding, deleting, selecting, or snapping objects.
 * **Smooth Animations:** Powered by the **GSAP** library for fluid transitions when objects appear or move.
+* **Multiple room layouts (Small / Medium / Large)** 
 
 ---
 
